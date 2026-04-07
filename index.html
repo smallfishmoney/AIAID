@@ -96,10 +96,9 @@
 
     <script>
         // --- 系統設定與金鑰 ---
-        // 您的 API Key
         const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4"; 
         
-        // --- 模式定義與智慧 Prompt ---
+        // --- 模式定義 ---
         const MODES = {
             TEXT: {
                 id: 'TEXT',
@@ -131,7 +130,7 @@
         const modeText = document.getElementById('currentModeText');
         const scanningLine = document.getElementById('scanningLine');
 
-        // --- 語音辨識設定 (STT) ---
+        // --- 語音辨識設定 ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
 
@@ -147,10 +146,6 @@
                 processVoiceCommand(transcript);
             };
 
-            recognition.onerror = (event) => {
-                // 忽略沒聽到聲音的報錯，避免洗畫面
-            };
-
             recognition.onend = () => {
                 if (isSystemActive && !isProcessing) {
                     try { recognition.start(); } catch(e){}
@@ -158,7 +153,7 @@
             };
         }
 
-        // --- 初始化系統 ---
+        // --- 系統初始化 ---
         async function initSystem(event) {
             if (event) event.stopPropagation(); 
             document.getElementById('startOverlay').style.display = 'none';
@@ -171,9 +166,8 @@
                 try { recognition.start(); } catch(e){}
             }
 
-            // 確保語音能正確初始化並發聲
             setTimeout(() => {
-                speak("系統已啟動。您可以隨時說出：切換文字、切換畫面，或是切換動作。點擊螢幕任何一處，或說出『掃描』，即可開始分析。");
+                speak("系統已啟動。您可以隨時說出：切換文字、切換畫面，或是切換動作。點擊螢幕即可開始分析。");
             }, 500);
         }
 
@@ -226,17 +220,16 @@
             executeAnalysis();
         }
 
-        // --- 執行擷取與分析 ---
+        // --- 擷取與分析 ---
         async function executeAnalysis() {
             if (isProcessing) return;
             isProcessing = true;
             
-            speak(`正在為您掃描${currentMode.name}，請稍候。`);
+            speak(`正在掃描${currentMode.name}，請稍候。`);
             
             scanningLine.style.display = 'block';
             scanningLine.style.animation = 'scan 1.5s linear infinite';
             
-            // 延遲執行確保 "請稍候" 的語音有時間開始唸
             setTimeout(async () => {
                 try {
                     if (!video.videoWidth || !video.videoHeight) {
@@ -253,7 +246,7 @@
                     const resultText = await callGeminiAPI(base64Image, currentMode.prompt);
                     
                     log(`AI 回應: ${resultText}`, "text-white");
-                    speak(resultText); // 播放最終結果
+                    speak(resultText);
 
                 } catch (error) {
                     log(`分析失敗: ${error.message}`, "text-red-500");
@@ -265,10 +258,11 @@
             }, 1500); 
         }
 
-        // --- 呼叫 Gemini API ---
+        // --- 呼叫 Gemini API (已更新模型名稱與端點) ---
         async function callGeminiAPI(base64Image, promptText) {
-            // ★★★ 修正點：使用正式版 gemini-1.5-flash 模型 ★★★
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            // ★ 明確指定為最新的 gemini-1.5-flash-latest，並使用較新版本的端點寫法 ★
+            const modelName = "gemini-1.5-flash-latest";
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
             
             const payload = {
                 contents: [{
@@ -313,7 +307,7 @@
             }
         }
 
-        // --- 強化版語音合成輸出 (TTS) ---
+        // --- 語音合成 (TTS) ---
         window.speechUtterances = []; 
 
         function speak(text) {
