@@ -96,7 +96,7 @@
 
     <script>
         // --- 系統設定與金鑰 ---
-        // 已將您的 API Key 寫入，方便在 GitHub 等外部環境運作
+        // 您的 API Key
         const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4"; 
         
         // --- 模式定義與智慧 Prompt ---
@@ -220,10 +220,8 @@
 
         function handleGlobalClick() {
             if (!isSystemActive) return;
-            if (isProcessing) {
-                // 點擊時若正在處理，可選擇不出聲打擾，或簡短提示
-                return;
-            }
+            if (isProcessing) return;
+            
             log("偵測到點擊，開始擷取畫面...");
             executeAnalysis();
         }
@@ -269,7 +267,8 @@
 
         // --- 呼叫 Gemini API ---
         async function callGeminiAPI(base64Image, promptText) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            // ★★★ 修正點：使用正式版 gemini-1.5-flash 模型 ★★★
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
             
             const payload = {
                 contents: [{
@@ -282,7 +281,6 @@
                 generationConfig: {
                     temperature: 0.4
                 },
-                // 降低安全審查門檻，避免課堂上出現人臉被誤擋
                 safetySettings: [
                     { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                     { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -299,7 +297,6 @@
 
             const data = await response.json();
 
-            // 強化錯誤處理機制，讓錯誤原因能被朗讀出來
             if (data.error) {
                 throw new Error(data.error.message || "未知的 API 錯誤");
             }
@@ -317,7 +314,6 @@
         }
 
         // --- 強化版語音合成輸出 (TTS) ---
-        // 解決 Chrome 與手機瀏覽器語音常常說到一半中斷 (Garbage Collection) 的 Bug
         window.speechUtterances = []; 
 
         function speak(text) {
@@ -326,36 +322,30 @@
                 return;
             }
 
-            // 清理 Markdown 符號 (如 *, #) 避免影響語音引擎發音
             const cleanText = text.replace(/[*#_`~]/g, '');
 
             if (recognition) {
                 try { recognition.stop(); } catch(e){}
             }
 
-            // 取消目前正在播放的語音，準備唸新的
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(cleanText);
             
-            // 嘗試尋找台灣繁體中文的語音
             const voices = window.speechSynthesis.getVoices();
             const twVoice = voices.find(v => v.lang === 'zh-TW' || v.lang.includes('zh-TW'));
             if (twVoice) utterance.voice = twVoice;
 
             utterance.lang = 'zh-TW';
-            utterance.rate = 1.15; // 稍微調快
+            utterance.rate = 1.15; 
             utterance.pitch = 1.0;
 
-            // 將物件放入全域陣列，防止被瀏覽器自動記憶體回收機制刪除導致中斷
             window.speechUtterances.push(utterance);
 
             utterance.onend = () => {
-                // 播放結束後從記憶體清除
                 const index = window.speechUtterances.indexOf(utterance);
                 if (index > -1) window.speechUtterances.splice(index, 1);
 
-                // 重新啟動語音辨識
                 if (isSystemActive && recognition && !isProcessing) {
                     try { recognition.start(); } catch(e){}
                 }
@@ -365,7 +355,6 @@
                 console.error("語音播放錯誤:", e);
             };
 
-            // 微小延遲確保 cancel() 已完全生效
             setTimeout(() => {
                 window.speechSynthesis.speak(utterance);
             }, 100);
@@ -379,7 +368,6 @@
             logArea.prepend(p);
         }
 
-        // 確保語音列表有被預先載入 (特別針對手機版與 Safari)
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
         }
