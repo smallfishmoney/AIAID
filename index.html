@@ -1,111 +1,397 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI視障課堂全功能系統</title>
-<script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>視障輔助語音上課系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { 
+            font-family: 'Noto Sans TC', sans-serif; 
+            background-color: #111827; /* 高對比暗色背景 */
+            color: #F3F4F6;
+            margin: 0;
+            overflow-x: hidden;
+        }
+        
+        /* 啟動覆蓋層，要求使用者首次互動以啟動語音 */
+        #startOverlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(17, 24, 39, 0.95);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(59, 130, 246, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 4px solid #3B82F6;
+        }
+
+        video {
+            width: 100%;
+            display: block;
+        }
+        
+        .status-badge {
+            transition: all 0.3s ease;
+        }
+    </style>
 </head>
+<body class="min-h-screen flex flex-col" onclick="handleGlobalClick()">
 
-<body class="bg-gray-900 text-white p-4">
+    <!-- 首次互動啟動層 (瀏覽器要求使用者必須先互動才能播放聲音) -->
+    <div id="startOverlay" onclick="initSystem(event)">
+        <div class="w-32 h-32 bg-blue-500 rounded-full flex items-center justify-center pulse-animation mb-6">
+            <svg class="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+            </svg>
+        </div>
+        <h1 class="text-4xl font-bold text-center px-4 leading-tight">點擊螢幕任意處<br>啟動語音輔助系統</h1>
+    </div>
 
-<h1 class="text-2xl font-bold mb-4">🎧 AI視障語音課堂系統</h1>
+    <!-- 主介面 -->
+    <header class="bg-gray-800 p-6 shadow-md text-center">
+        <h1 class="text-3xl font-bold text-blue-400">課堂語音輔助系統</h1>
+        <p class="text-gray-400 mt-2 text-lg">目前模式：<span id="currentModeText" class="text-white font-bold bg-blue-600 px-3 py-1 rounded-full status-badge">文字讀取</span></p>
+    </header>
 
-<video id="video" autoplay playsinline class="w-full rounded"></video>
-<canvas id="canvas" class="hidden"></canvas>
+    <main class="flex-grow p-6 flex flex-col items-center justify-start space-y-6">
+        
+        <!-- 攝影機畫面 -->
+        <div id="video-container" class="shadow-2xl">
+            <video id="video" autoplay playsinline muted></video>
+            <div id="scanningLine" class="absolute top-0 left-0 w-full h-1 bg-blue-400 shadow-[0_0_15px_#3B82F6] hidden"></div>
+        </div>
+        <canvas id="canvas" class="hidden"></canvas>
 
-<div class="mt-4 space-x-2">
-<button onclick="startCamera()" class="bg-green-600 px-4 py-2 rounded">開啟鏡頭</button>
-<button onclick="capture()" class="bg-blue-600 px-4 py-2 rounded">拍照</button>
-</div>
+        <!-- 狀態與日誌提示 -->
+        <div class="w-full max-w-2xl bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+            <h2 class="text-xl font-bold text-gray-300 mb-3 border-b border-gray-600 pb-2">系統狀態紀錄</h2>
+            <div id="logArea" class="h-48 overflow-y-auto text-lg space-y-2 font-mono">
+                <p class="text-gray-500">系統尚未啟動...</p>
+            </div>
+        </div>
 
-<div class="mt-4 p-4 bg-gray-800 rounded">
-<p id="result">等待語音指令...</p>
-</div>
+        <div class="text-center text-gray-400 text-sm max-w-xl">
+            <p>【操作提示】隨時說出「切換文字」、「切換圖片」或「切換動作」來更改模式。說出「掃描」或「點擊畫面」即可進行分析。</p>
+        </div>
 
-<script>
-const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4";
+    </main>
 
-let mode = "text"; // text / scene / action / emotion
-const synth = window.speechSynthesis;
+    <script>
+        // --- 系統設定與金鑰 ---
+        const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4"; 
+        
+        // --- 模式定義與智慧 Prompt ---
+        const MODES = {
+            TEXT: {
+                id: 'TEXT',
+                name: '文字讀取',
+                keyword: ['文字', '黑板文字', '讀字'],
+                prompt: `請擷取圖片中黑板、白板或投影幕上的所有文字內容。
+                         請直接輸出文字本身，唸出排版結構，不要加任何『圖片中顯示...』等額外的開場白或解釋。`
+            },
+            IMAGE: {
+                id: 'IMAGE',
+                name: '畫面描述',
+                keyword: ['圖片', '畫面', '描述圖片'],
+                prompt: `這是一張上課的畫面。請為視障學生詳細描述畫面的整體內容，包含黑板上的圖表結構、物體配置等。
+                         請用語氣溫和的語音導覽方式描述，讓視障生能在腦海中建構出目前的視覺場景。`
+            },
+            ACTION_EMOTION: {
+                id: 'ACTION_EMOTION',
+                name: '動作與情緒',
+                keyword: ['動作', '情緒', '老師', '情境'],
+                // 智慧呈現的核心 Prompt：強制要求將情緒、動作與黑板內容進行意義上的連結
+                prompt: `你是一個專為視障學生設計的課堂輔助系統。請分析這張圖片中老師（或主要人物）的肢體動作、臉部表情與情緒。
+                         【重要指示】：請智慧地將「老師的動作/情緒」與「黑板或目前的教學內容」結合起來描述。
+                         例如：『老師現在面帶微笑，右手正指著黑板上的數學公式，看起來正在強調這個重點。』
+                         或是：『老師表情嚴肅，雙手撐在講台上看著台下，似乎在等待大家安靜。』
+                         請用一句或兩句生動、簡短的口語直接輸出描述，讓視障生能立刻感受到課堂的動態氛圍與教學情境。`
+            }
+        };
 
-function speak(text){
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "zh-TW";
-    synth.speak(u);
-}
+        let currentMode = MODES.TEXT;
+        let isSystemActive = false;
+        let isSpeaking = false;
+        let isProcessing = false;
 
-async function startCamera(){
-    const stream = await navigator.mediaDevices.getUserMedia({video:true});
-    video.srcObject = stream;
-    speak("鏡頭已啟動");
-}
+        // --- DOM 元素 ---
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const logArea = document.getElementById('logArea');
+        const modeText = document.getElementById('currentModeText');
+        const scanningLine = document.getElementById('scanningLine');
 
-function capture(){
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video,0,0);
+        // --- 語音辨識設定 (STT) ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
 
-    const base64 = canvas.toDataURL("image/jpeg").split(",")[1];
-    analyze(base64);
-}
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true; // 持續監聽
+            recognition.interimResults = false;
+            recognition.lang = 'zh-TW';
 
-async function analyze(img){
+            recognition.onresult = (event) => {
+                const transcript = event.results[event.results.length - 1][0].transcript.trim();
+                log(`聽到指令: "${transcript}"`);
+                processVoiceCommand(transcript);
+            };
 
-let prompt="";
+            recognition.onerror = (event) => {
+                console.error("語音辨識錯誤:", event.error);
+                // 忽略 no-speech 錯誤，保持系統安靜
+            };
 
-if(mode==="text"){
-prompt="請辨識圖片中文字，只輸出文字";
-}
-else if(mode==="scene"){
-prompt="請描述畫面內容，包含空間位置（左邊右邊上下）與重點";
-}
-else if(mode==="action"){
-prompt="請描述人物動作與行為，像旁白解說";
-}
-else if(mode==="emotion"){
-prompt="請描述人物情緒與表情，語氣溫和";
-}
+            recognition.onend = () => {
+                // 如果系統啟動中且沒有在說話，則自動重啟語音辨識
+                if (isSystemActive && !isSpeaking) {
+                    try { recognition.start(); } catch(e){}
+                }
+            };
+        } else {
+            log("您的瀏覽器不支援語音辨識，請使用點擊操作。", "text-red-400");
+        }
 
-const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,{
-method:"POST",
-body:JSON.stringify({
-contents:[{
-parts:[
-{text:prompt},
-{inlineData:{mimeType:"image/jpeg",data:img}}
-]
-}]
-})
-});
+        // --- 初始化系統 ---
+        async function initSystem(event) {
+            if (event) event.stopPropagation(); // 防止觸發全域點擊
+            document.getElementById('startOverlay').style.display = 'none';
+            isSystemActive = true;
 
-const data = await res.json();
-const text = data.candidates[0].content.parts[0].text;
+            log("系統啟動中，正在存取攝影機...", "text-blue-400");
+            await startCamera();
+            
+            // 啟動語音辨識
+            if (recognition) {
+                try { recognition.start(); } catch(e){}
+            }
 
-document.getElementById("result").innerText = text;
-speak(text);
-}
+            // 語音引導進入系統
+            speak("歡迎使用視障輔助語音上課系統。系統已啟動。您可以隨時說出：切換文字、切換畫面，或是切換動作。點擊螢幕任何一處，或說出『掃描』，系統就會為您分析目前前方的畫面。");
+        }
 
-// 🎤 語音控制
-const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.lang = "zh-TW";
-recognition.continuous = true;
+        // --- 啟動攝影機 ---
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } // 優先使用後置鏡頭
+                });
+                video.srcObject = stream;
+                log("攝影機啟動成功。", "text-green-400");
+            } catch (err) {
+                log(`攝影機啟動失敗: ${err.message}`, "text-red-500");
+                speak("無法存取攝影機，請檢查權限設定。");
+            }
+        }
 
-recognition.onresult = (e)=>{
-const t = e.results[e.results.length-1][0].transcript;
+        // --- 處理語音指令 ---
+        function processVoiceCommand(transcript) {
+            if (isProcessing) return;
 
-if(t.includes("文字模式")){mode="text"; speak("切換文字模式");}
-if(t.includes("圖像模式")){mode="scene"; speak("切換圖像模式");}
-if(t.includes("動作模式")){mode="action"; speak("切換動作模式");}
-if(t.includes("情緒模式")){mode="emotion"; speak("切換情緒模式");}
-if(t.includes("拍照")) capture();
-if(t.includes("停止")) synth.cancel();
-if(t.includes("開始")) speak("系統已啟動");
-};
+            // 檢查切換模式指令
+            if (transcript.includes('文字')) {
+                setMode(MODES.TEXT);
+            } else if (transcript.includes('圖片') || transcript.includes('畫面')) {
+                setMode(MODES.IMAGE);
+            } else if (transcript.includes('動作') || transcript.includes('情緒') || transcript.includes('老師')) {
+                setMode(MODES.ACTION_EMOTION);
+            } 
+            // 檢查執行指令
+            else if (transcript.includes('掃描') || transcript.includes('執行') || transcript.includes('分析') || transcript.includes('看')) {
+                executeAnalysis();
+            }
+        }
 
-recognition.start();
-</script>
+        // --- 設定模式 ---
+        function setMode(newMode) {
+            if (currentMode.id === newMode.id) return;
+            currentMode = newMode;
+            modeText.innerText = currentMode.name;
+            modeText.className = "text-white font-bold px-3 py-1 rounded-full status-badge bg-green-600";
+            setTimeout(() => {
+                modeText.className = "text-white font-bold px-3 py-1 rounded-full status-badge bg-blue-600";
+            }, 1000);
+            
+            log(`已切換至【${currentMode.name}】模式`, "text-yellow-400");
+            speak(`已切換至${currentMode.name}模式`);
+        }
 
+        // --- 全域點擊處理 (方便視障者操作) ---
+        function handleGlobalClick() {
+            if (!isSystemActive) return;
+            if (isProcessing) {
+                speak("系統正在處理中，請稍候。");
+                return;
+            }
+            log("偵測到點擊，開始擷取畫面...");
+            executeAnalysis();
+        }
+
+        // --- 執行擷取與分析 ---
+        async function executeAnalysis() {
+            if (isProcessing) return;
+            isProcessing = true;
+            
+            speak(`正在為您處理${currentMode.name}，請稍候。`);
+            
+            // 啟動掃描動畫
+            scanningLine.style.display = 'block';
+            scanningLine.style.animation = 'scan 1.5s linear infinite';
+            
+            // 等待語音播放一小段時間後擷取畫面
+            setTimeout(async () => {
+                try {
+                    // 1. 擷取畫面
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+                    log("畫面擷取完成，發送至 AI 分析...", "text-blue-300");
+
+                    // 2. 呼叫 Gemini API
+                    const resultText = await callGeminiAPI(base64Image, currentMode.prompt);
+                    
+                    // 3. 處理結果並播放
+                    log(`AI 回應: ${resultText}`, "text-white");
+                    speak(resultText);
+
+                } catch (error) {
+                    log(`分析失敗: ${error.message}`, "text-red-500");
+                    speak("抱歉，分析過程中發生錯誤，請稍後再試。");
+                } finally {
+                    isProcessing = false;
+                    scanningLine.style.display = 'none';
+                }
+            }, 1500);
+        }
+
+        // --- 呼叫 Gemini API (包含 Exponential Backoff 重試機制) ---
+        async function callGeminiAPI(base64Image, promptText, retries = 5) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: promptText },
+                        { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+                    ]
+                }],
+                generationConfig: {
+                    temperature: 0.4 // 稍微降低溫度，讓結果更具體描述事實
+                }
+            };
+
+            const delays = [1000, 2000, 4000, 8000, 16000];
+
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP Error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    if (data.candidates && data.candidates[0].content.parts[0].text) {
+                        return data.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("API 回傳格式不符合預期");
+                    }
+
+                } catch (error) {
+                    if (i === retries - 1) {
+                        throw error;
+                    }
+                    await new Promise(res => setTimeout(res, delays[i]));
+                }
+            }
+        }
+
+        // --- 語音合成輸出 (TTS) ---
+        function speak(text) {
+            if (!window.speechSynthesis) {
+                log("瀏覽器不支援語音合成", "text-red-500");
+                return;
+            }
+
+            // 停止正在播放的語音和正在聆聽的麥克風 (防止錄到系統自己的聲音)
+            window.speechSynthesis.cancel();
+            if (recognition) {
+                try { recognition.stop(); } catch(e){}
+            }
+            isSpeaking = true;
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-TW';
+            utterance.rate = 1.1; // 稍微調快語速，視障者通常習慣較快語速
+            utterance.pitch = 1.0;
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                // 語音播報結束後，重新啟動語音辨識
+                if (isSystemActive && recognition && !isProcessing) {
+                    try { recognition.start(); } catch(e){}
+                }
+            };
+
+            utterance.onerror = (e) => {
+                console.error("語音播放錯誤:", e);
+                isSpeaking = false;
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- 介面日誌輔助函數 ---
+        function log(message, colorClass = "text-gray-300") {
+            const time = new Date().toLocaleTimeString('zh-TW', {hour12: false});
+            const p = document.createElement('p');
+            p.className = colorClass;
+            p.innerText = `[${time}] ${message}`;
+            logArea.prepend(p); // 最新訊息放在最上面
+        }
+
+        // 加入 CSS 動畫定義
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes scan {
+                0% { top: 0; opacity: 0; }
+                10% { opacity: 1; }
+                90% { opacity: 1; }
+                100% { top: 100%; opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+
+    </script>
 </body>
 </html>
