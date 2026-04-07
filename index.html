@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI視障課堂全功能系統</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white p-4">
+
+<h1 class="text-2xl font-bold mb-4">🎧 AI視障語音課堂系統</h1>
+
+<video id="video" autoplay playsinline class="w-full rounded"></video>
+<canvas id="canvas" class="hidden"></canvas>
+
+<div class="mt-4 space-x-2">
+<button onclick="startCamera()" class="bg-green-600 px-4 py-2 rounded">開啟鏡頭</button>
+<button onclick="capture()" class="bg-blue-600 px-4 py-2 rounded">拍照</button>
+</div>
+
+<div class="mt-4 p-4 bg-gray-800 rounded">
+<p id="result">等待語音指令...</p>
+</div>
+
+<script>
+const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4";
+
+let mode = "text"; // text / scene / action / emotion
+const synth = window.speechSynthesis;
+
+function speak(text){
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-TW";
+    synth.speak(u);
+}
+
+async function startCamera(){
+    const stream = await navigator.mediaDevices.getUserMedia({video:true});
+    video.srcObject = stream;
+    speak("鏡頭已啟動");
+}
+
+function capture(){
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video,0,0);
+
+    const base64 = canvas.toDataURL("image/jpeg").split(",")[1];
+    analyze(base64);
+}
+
+async function analyze(img){
+
+let prompt="";
+
+if(mode==="text"){
+prompt="請辨識圖片中文字，只輸出文字";
+}
+else if(mode==="scene"){
+prompt="請描述畫面內容，包含空間位置（左邊右邊上下）與重點";
+}
+else if(mode==="action"){
+prompt="請描述人物動作與行為，像旁白解說";
+}
+else if(mode==="emotion"){
+prompt="請描述人物情緒與表情，語氣溫和";
+}
+
+const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,{
+method:"POST",
+body:JSON.stringify({
+contents:[{
+parts:[
+{text:prompt},
+{inlineData:{mimeType:"image/jpeg",data:img}}
+]
+}]
+})
+});
+
+const data = await res.json();
+const text = data.candidates[0].content.parts[0].text;
+
+document.getElementById("result").innerText = text;
+speak(text);
+}
+
+// 🎤 語音控制
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+recognition.lang = "zh-TW";
+recognition.continuous = true;
+
+recognition.onresult = (e)=>{
+const t = e.results[e.results.length-1][0].transcript;
+
+if(t.includes("文字模式")){mode="text"; speak("切換文字模式");}
+if(t.includes("圖像模式")){mode="scene"; speak("切換圖像模式");}
+if(t.includes("動作模式")){mode="action"; speak("切換動作模式");}
+if(t.includes("情緒模式")){mode="emotion"; speak("切換情緒模式");}
+if(t.includes("拍照")) capture();
+if(t.includes("停止")) synth.cancel();
+if(t.includes("開始")) speak("系統已啟動");
+};
+
+recognition.start();
+</script>
+
+</body>
+</html>
