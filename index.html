@@ -55,10 +55,34 @@
         .status-badge {
             transition: all 0.3s ease;
         }
+
+        @keyframes scan {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
     </style>
 </head>
-<body class="min-h-screen flex flex-col" onclick="handleGlobalClick()">
+<body class="min-h-screen flex flex-col" onclick="handleGlobalClick(event)">
 
+    <!-- 金鑰設定對話框 (使用者自行輸入金鑰，不留存於程式碼) -->
+    <div id="apiKeyModal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+        <div class="bg-gray-800 p-8 rounded-2xl w-11/12 max-w-md border border-gray-700 shadow-2xl">
+            <h3 class="text-2xl font-bold text-blue-400 mb-4">設定 Google API Key</h3>
+            <p class="text-gray-300 mb-4 text-sm leading-relaxed">
+                為了在 GitHub 上安全運作，請在此貼上您的 Gemini API Key。<br><br>
+                <span class="text-green-400 font-bold">安全機制：</span>金鑰只會儲存在您這台裝置的瀏覽器中，不會外流！
+            </p>
+            <input type="password" id="apiKeyInput" class="w-full bg-gray-900 text-white border border-gray-600 rounded-lg p-3 mb-6 focus:outline-none focus:border-blue-500" placeholder="請貼上新申請的 AIzaSy...">
+            <div class="flex space-x-3">
+                <button onclick="closeApiModal(event)" class="w-1/3 bg-gray-600 hover:bg-gray-500 transition-colors text-white font-bold py-3 px-4 rounded-lg">取消</button>
+                <button onclick="saveApiKey(event)" class="w-2/3 bg-blue-600 hover:bg-blue-700 transition-colors text-white font-bold py-3 px-4 rounded-lg">儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 啟動覆蓋層 -->
     <div id="startOverlay" onclick="initSystem(event)">
         <div class="w-32 h-32 bg-blue-500 rounded-full flex items-center justify-center pulse-animation mb-6">
             <svg class="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -68,13 +92,20 @@
         <h1 class="text-4xl font-bold text-center px-4 leading-tight">點擊螢幕任意處<br>啟動語音輔助系統</h1>
     </div>
 
-    <header class="bg-gray-800 p-6 shadow-md text-center">
+    <header class="bg-gray-800 p-6 shadow-md text-center relative">
         <h1 class="text-3xl font-bold text-blue-400">課堂語音輔助系統</h1>
         <p class="text-gray-400 mt-2 text-lg">目前模式：<span id="currentModeText" class="text-white font-bold bg-blue-600 px-3 py-1 rounded-full status-badge">文字讀取</span></p>
+        
+        <!-- 手動開啟設定的按鈕 -->
+        <button onclick="showApiModal(event)" class="absolute top-6 right-6 bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-full shadow-lg transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+        </button>
     </header>
 
     <main class="flex-grow p-6 flex flex-col items-center justify-start space-y-6">
-        
         <div id="video-container" class="shadow-2xl">
             <video id="video" autoplay playsinline muted></video>
             <div id="scanningLine" class="absolute top-0 left-0 w-full h-1 bg-blue-400 shadow-[0_0_15px_#3B82F6] hidden"></div>
@@ -89,33 +120,36 @@
         </div>
 
         <div class="text-center text-gray-400 text-sm max-w-xl">
-            <p>【操作提示】隨時說出「切換文字」、「切換圖片」或「切換動作」來更改模式。說出「掃描」或「點擊畫面」即可進行分析。</p>
+            <p>【操作提示】說出「切換文字」、「切換圖片」或「切換動作」更改模式。說出「掃描」或點擊畫面進行分析。</p>
         </div>
-
     </main>
 
     <script>
-        // --- 系統設定與金鑰 ---
-        const apiKey = "AIzaSyBo_Q3R47F9MICB2yUO6hQjeviO9eglCE4"; 
+        // --- 安全金鑰處理機制 ---
+        // 絕對不要在這裡填寫明文金鑰！系統會自動從瀏覽器儲存空間讀取。
+        const apiKey = ""; 
         
+        function getActiveKey() {
+            // 從 LocalStorage 讀取使用者設定的金鑰
+            return localStorage.getItem('geminiApiKey') || apiKey;
+        }
+
         // --- 模式定義 ---
         const MODES = {
             TEXT: {
                 id: 'TEXT',
                 name: '文字讀取',
-                prompt: `請擷取圖片中黑板、白板或投影幕上的所有文字內容。請直接輸出文字本身，唸出排版結構，不要加任何開場白或解釋。`
+                prompt: `請擷取圖片中黑板、白板或投影幕上的所有文字內容。請直接輸出文字本身，唸出排版結構，不要加任何開場白。`
             },
             IMAGE: {
                 id: 'IMAGE',
                 name: '畫面描述',
-                prompt: `這是一張上課的畫面。請為視障學生詳細描述畫面的整體內容，包含黑板上的圖表結構、物體配置等。請用語氣溫和的語音導覽方式描述，字數精簡。`
+                prompt: `這是一張上課的畫面。請為視障學生詳細描述畫面的整體內容，包含黑板上的圖表結構、物體配置等。請用語氣溫和的語音導覽方式描述。`
             },
             ACTION_EMOTION: {
                 id: 'ACTION_EMOTION',
                 name: '動作與情緒',
-                prompt: `你是一個專為視障學生設計的課堂輔助系統。請分析這張圖片中老師（或主要人物）的肢體動作、臉部表情與情緒。
-                         【重要指示】：請智慧地將「老師的動作/情緒」與「黑板或目前的教學內容」結合起來描述。
-                         請用一句或兩句生動、簡短的口語直接輸出描述，讓視障生能立刻感受到課堂的動態氛圍與教學情境。`
+                prompt: `請分析這張圖片中老師（或主要人物）的肢體動作、臉部表情與情緒。請用一句或兩句生動、簡短的口語直接輸出描述，讓視障生能立刻感受到課堂的動態氛圍。`
             }
         };
 
@@ -130,7 +164,7 @@
         const modeText = document.getElementById('currentModeText');
         const scanningLine = document.getElementById('scanningLine');
 
-        // --- 語音辨識設定 ---
+        // --- 語音辨識設定 (STT) ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
 
@@ -153,9 +187,36 @@
             };
         }
 
-        // --- 系統初始化 ---
+        // --- UI 及金鑰儲存功能 ---
+        function showApiModal(event) {
+            if (event) event.stopPropagation();
+            const currentKey = localStorage.getItem('geminiApiKey') || "";
+            document.getElementById('apiKeyInput').value = currentKey;
+            document.getElementById('apiKeyModal').classList.remove('hidden');
+        }
+
+        function closeApiModal(event) {
+            if (event) event.stopPropagation();
+            document.getElementById('apiKeyModal').classList.add('hidden');
+        }
+
+        function saveApiKey(event) {
+            if (event) event.stopPropagation();
+            const input = document.getElementById('apiKeyInput').value.trim();
+            if (input) {
+                localStorage.setItem('geminiApiKey', input);
+                closeApiModal();
+                log("API Key 已安全儲存至瀏覽器", "text-green-400");
+                speak("金鑰儲存成功");
+            } else {
+                alert("金鑰不能為空！");
+            }
+        }
+
+        // --- 初始化系統 ---
         async function initSystem(event) {
             if (event) event.stopPropagation(); 
+            
             document.getElementById('startOverlay').style.display = 'none';
             isSystemActive = true;
 
@@ -166,9 +227,14 @@
                 try { recognition.start(); } catch(e){}
             }
 
-            setTimeout(() => {
-                speak("系統已啟動。您可以隨時說出：切換文字、切換畫面，或是切換動作。點擊螢幕即可開始分析。");
-            }, 500);
+            // 檢查是否已設定金鑰，若無則跳出提醒
+            if (!getActiveKey()) {
+                log("請點擊右上角設定您的 API Key 以啟用分析功能", "text-yellow-400");
+                speak("系統已啟動。但您尚未設定 API Key，請點擊右上角按鈕進行設定。");
+                setTimeout(showApiModal, 3000);
+            } else {
+                speak("系統已啟動。您可以隨時說出切換文字、切換畫面，或是切換動作。點擊螢幕任何一處即可開始分析。");
+            }
         }
 
         async function startCamera() {
@@ -186,17 +252,10 @@
 
         function processVoiceCommand(transcript) {
             if (isProcessing) return;
-
-            if (transcript.includes('文字')) {
-                setMode(MODES.TEXT);
-            } else if (transcript.includes('圖片') || transcript.includes('畫面')) {
-                setMode(MODES.IMAGE);
-            } else if (transcript.includes('動作') || transcript.includes('情緒') || transcript.includes('老師')) {
-                setMode(MODES.ACTION_EMOTION);
-            } 
-            else if (transcript.includes('掃描') || transcript.includes('執行') || transcript.includes('分析') || transcript.includes('看')) {
-                executeAnalysis();
-            }
+            if (transcript.includes('文字')) setMode(MODES.TEXT);
+            else if (transcript.includes('圖片') || transcript.includes('畫面')) setMode(MODES.IMAGE);
+            else if (transcript.includes('動作') || transcript.includes('情緒') || transcript.includes('老師')) setMode(MODES.ACTION_EMOTION);
+            else if (transcript.includes('掃描') || transcript.includes('執行') || transcript.includes('分析') || transcript.includes('看')) executeAnalysis();
         }
 
         function setMode(newMode) {
@@ -204,37 +263,58 @@
             currentMode = newMode;
             modeText.innerText = currentMode.name;
             modeText.className = "text-white font-bold px-3 py-1 rounded-full status-badge bg-green-600";
-            setTimeout(() => {
-                modeText.className = "text-white font-bold px-3 py-1 rounded-full status-badge bg-blue-600";
-            }, 1000);
+            setTimeout(() => { modeText.className = "text-white font-bold px-3 py-1 rounded-full status-badge bg-blue-600"; }, 1000);
             
             log(`已切換至【${currentMode.name}】模式`, "text-yellow-400");
-            speak(`已切換至${currentMode.name}模式`);
+            speak(`切換至${currentMode.name}`);
         }
 
-        function handleGlobalClick() {
-            if (!isSystemActive) return;
-            if (isProcessing) return;
-            
-            log("偵測到點擊，開始擷取畫面...");
+        function handleGlobalClick(event) {
+            if (!isSystemActive || isProcessing) return;
+            if (event.target.closest('button') || event.target.closest('#apiKeyModal') || event.target.closest('input')) return;
             executeAnalysis();
         }
 
-        // --- 擷取與分析 ---
+        // --- 加入指數退避機制的 API 呼叫 ---
+        async function fetchWithBackoff(url, payload) {
+            const delays = [1000, 2000, 4000, 8000, 16000];
+            let lastError;
+            for (let i = 0; i < 6; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    if (!response.ok || data.error) throw new Error(data.error?.message || `狀態碼: ${response.status}`);
+                    return data;
+                } catch (error) {
+                    lastError = error;
+                    if (i < 5) await new Promise(resolve => setTimeout(resolve, delays[i]));
+                }
+            }
+            throw new Error(`連線失敗 (${lastError.message})`);
+        }
+
+        // --- 擷取畫面與分析 ---
         async function executeAnalysis() {
             if (isProcessing) return;
+            const currentKey = getActiveKey();
+            if (!currentKey) {
+                speak("請先設定 API Key");
+                showApiModal();
+                return;
+            }
+
             isProcessing = true;
-            
             speak(`正在掃描${currentMode.name}，請稍候。`);
-            
             scanningLine.style.display = 'block';
             scanningLine.style.animation = 'scan 1.5s linear infinite';
             
             setTimeout(async () => {
                 try {
-                    if (!video.videoWidth || !video.videoHeight) {
-                        throw new Error("攝影機畫面尚未準備好，請稍後再試。");
-                    }
+                    if (!video.videoWidth) throw new Error("攝影機尚未準備好");
 
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
@@ -242,12 +322,10 @@
                     const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
                     log("發送至 AI 分析中...", "text-blue-300");
-
-                    const resultText = await callGeminiAPI(base64Image, currentMode.prompt);
+                    const resultText = await callGeminiAPI(base64Image, currentMode.prompt, currentKey);
                     
                     log(`AI 回應: ${resultText}`, "text-white");
-                    speak(resultText);
-
+                    speak(resultText); 
                 } catch (error) {
                     log(`分析失敗: ${error.message}`, "text-red-500");
                     speak(`抱歉，發生錯誤：${error.message}`);
@@ -258,12 +336,9 @@
             }, 1500); 
         }
 
-        // --- 呼叫 Gemini API (已更新模型名稱與端點) ---
-        async function callGeminiAPI(base64Image, promptText) {
-            // ★ 明確指定為最新的 gemini-1.5-flash-latest，並使用較新版本的端點寫法 ★
-            const modelName = "gemini-1.5-flash-latest";
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-            
+        // --- 呼叫 Gemini API ---
+        async function callGeminiAPI(base64Image, promptText, key) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
             const payload = {
                 contents: [{
                     role: "user",
@@ -272,86 +347,45 @@
                         { inlineData: { mimeType: "image/jpeg", data: base64Image } }
                     ]
                 }],
-                generationConfig: {
-                    temperature: 0.4
-                },
-                safetySettings: [
-                    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-                ]
+                generationConfig: { temperature: 0.4 }
             };
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            const data = await fetchWithBackoff(url, payload);
 
-            const data = await response.json();
-
-            if (data.error) {
-                throw new Error(data.error.message || "未知的 API 錯誤");
-            }
-            if (data.promptFeedback && data.promptFeedback.blockReason) {
-                throw new Error("畫面內容被系統安全機制阻擋");
-            }
-            if (data.candidates && data.candidates[0].finishReason === 'SAFETY') {
-                throw new Error("分析中包含敏感內容，已被安全機制阻擋");
-            }
+            if (data.promptFeedback && data.promptFeedback.blockReason) throw new Error("被系統安全機制阻擋");
+            if (data.candidates && data.candidates[0].finishReason === 'SAFETY') throw new Error("包含敏感內容被阻擋");
             if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
                 return data.candidates[0].content.parts[0].text;
             } else {
-                throw new Error("無法解析 AI 回傳格式");
+                throw new Error("無法解析回傳格式，請檢查金鑰是否正確");
             }
         }
 
-        // --- 語音合成 (TTS) ---
+        // --- 語音合成輸出 (TTS) ---
         window.speechUtterances = []; 
-
         function speak(text) {
-            if (!window.speechSynthesis) {
-                log("瀏覽器不支援語音合成", "text-red-500");
-                return;
-            }
-
+            if (!window.speechSynthesis) return;
             const cleanText = text.replace(/[*#_`~]/g, '');
 
-            if (recognition) {
-                try { recognition.stop(); } catch(e){}
-            }
-
+            if (recognition) { try { recognition.stop(); } catch(e){} }
             window.speechSynthesis.cancel();
-
-            const utterance = new SpeechSynthesisUtterance(cleanText);
             
+            const utterance = new SpeechSynthesisUtterance(cleanText);
             const voices = window.speechSynthesis.getVoices();
-            const twVoice = voices.find(v => v.lang === 'zh-TW' || v.lang.includes('zh-TW'));
+            const twVoice = voices.find(v => v.lang.includes('zh-TW'));
             if (twVoice) utterance.voice = twVoice;
-
+            
             utterance.lang = 'zh-TW';
             utterance.rate = 1.15; 
-            utterance.pitch = 1.0;
-
+            
             window.speechUtterances.push(utterance);
-
             utterance.onend = () => {
                 const index = window.speechUtterances.indexOf(utterance);
                 if (index > -1) window.speechUtterances.splice(index, 1);
-
-                if (isSystemActive && recognition && !isProcessing) {
-                    try { recognition.start(); } catch(e){}
-                }
+                if (isSystemActive && recognition && !isProcessing) { try { recognition.start(); } catch(e){} }
             };
 
-            utterance.onerror = (e) => {
-                console.error("語音播放錯誤:", e);
-            };
-
-            setTimeout(() => {
-                window.speechSynthesis.speak(utterance);
-            }, 100);
+            setTimeout(() => { window.speechSynthesis.speak(utterance); }, 100);
         }
 
         function log(message, colorClass = "text-gray-300") {
@@ -365,18 +399,6 @@
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
         }
-
-        const style = document.createElement('style');
-        style.innerHTML = `
-            @keyframes scan {
-                0% { top: 0; opacity: 0; }
-                10% { opacity: 1; }
-                90% { opacity: 1; }
-                100% { top: 100%; opacity: 0; }
-            }
-        `;
-        document.head.appendChild(style);
-
     </script>
 </body>
 </html>
