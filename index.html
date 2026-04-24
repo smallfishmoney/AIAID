@@ -66,7 +66,7 @@
 </head>
 <body class="min-h-screen flex flex-col" onclick="handleGlobalClick(event)">
 
-    <!-- 金鑰設定對話框 (使用者自行輸入金鑰，不留存於程式碼) -->
+    <!-- 金鑰設定對話框 -->
     <div id="apiKeyModal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
         <div class="bg-gray-800 p-8 rounded-2xl w-11/12 max-w-md border border-gray-700 shadow-2xl">
             <h3 class="text-2xl font-bold text-blue-400 mb-4">設定 Google API Key</h3>
@@ -126,10 +126,9 @@
 
     <script>
         // --- 安全金鑰處理機制 ---
-        const apiKey = ""; 
+        const apiKey = "AIzaSyCyZSyLwqlKsvwdy9knofm50pfRtjYzSC4"; 
         
         function getActiveKey() {
-            // 從 LocalStorage 讀取使用者設定的金鑰
             return localStorage.getItem('geminiApiKey') || apiKey;
         }
 
@@ -186,7 +185,6 @@
             };
         }
 
-        // --- UI 及金鑰儲存功能 ---
         function showApiModal(event) {
             if (event) event.stopPropagation();
             const currentKey = localStorage.getItem('geminiApiKey') || "";
@@ -212,7 +210,6 @@
             }
         }
 
-        // --- 初始化系統 ---
         async function initSystem(event) {
             if (event) event.stopPropagation(); 
             
@@ -226,7 +223,6 @@
                 try { recognition.start(); } catch(e){}
             }
 
-            // 檢查是否已設定金鑰
             if (!getActiveKey()) {
                 log("請點擊右上角設定您的 API Key 以啟用分析功能", "text-yellow-400");
                 speak("系統已啟動。但您尚未設定 API Key，請點擊右上角按鈕進行設定。");
@@ -274,11 +270,11 @@
             executeAnalysis();
         }
 
-        // --- 加入指數退避機制的 API 呼叫 ---
+        // 優化後的網路請求機制：遇到額度問題直接擋下，不浪費時間重試
         async function fetchWithBackoff(url, payload) {
-            const delays = [1000, 2000, 4000, 8000, 16000];
+            const delays = [1000, 2000]; // 減少重試次數，加快錯誤反應速度
             let lastError;
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i <= delays.length; i++) {
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
@@ -286,17 +282,31 @@
                         body: JSON.stringify(payload)
                     });
                     const data = await response.json();
-                    if (!response.ok || data.error) throw new Error(data.error?.message || `狀態碼: ${response.status}`);
+                    
+                    if (!response.ok || data.error) {
+                        const errorMsg = data.error?.message || `狀態碼: ${response.status}`;
+                        // 若確認是額度耗盡 (429 或含有 Quota exceeded) 或者是 API 金鑰錯誤 (400)
+                        if (errorMsg.includes('Quota exceeded') || response.status === 429) {
+                            throw new Error(`API_QUOTA_EXCEEDED`); // 發送特殊錯誤碼
+                        }
+                        if (errorMsg.includes('not found') || response.status === 404) {
+                            throw new Error(`找不到該模型`);
+                        }
+                        throw new Error(errorMsg);
+                    }
                     return data;
                 } catch (error) {
                     lastError = error;
-                    if (i < 5) await new Promise(resolve => setTimeout(resolve, delays[i]));
+                    // 如果是致命錯誤（例如額度沒了），不等待直接拋出，跳出重試迴圈
+                    if (error.message === 'API_QUOTA_EXCEEDED' || error.message.includes('找不到')) {
+                        throw error;
+                    }
+                    if (i < delays.length) await new Promise(resolve => setTimeout(resolve, delays[i]));
                 }
             }
             throw new Error(`連線失敗 (${lastError.message})`);
         }
 
-        // --- 擷取畫面與分析 (包含多模型備援機制) ---
         async function executeAnalysis() {
             if (isProcessing) return;
             const currentKey = getActiveKey();
@@ -320,8 +330,8 @@
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-                    // 定義要依序嘗試的模型清單，解決特定模型暫時失效的問題
-                    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"];
+                    // 將最穩定的 1.5-flash 放回首位，並加入輕量化 8b 模型
+                    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash", "gemini-1.5-pro"];
                     let resultText = "";
                     let success = false;
                     let lastErrorMessage = "";
@@ -331,10 +341,19 @@
                             log(`發送至 AI 分析中 (使用模型: ${modelName})...`, "text-blue-300");
                             resultText = await callGeminiAPI(base64Image, currentMode.prompt, currentKey, modelName);
                             success = true;
-                            break; // 成功則跳出迴圈
+                            break; 
                         } catch (error) {
+                            // 判斷是否為額度耗盡
+                            if (error.message === 'API_QUOTA_EXCEEDED') {
+                                log(`❌ 錯誤：API 金鑰免費額度為 0 或已耗盡。`, "text-red-500");
+                                log(`請至 Google AI Studio 綁定付款資訊或檢查專案狀態。`, "text-red-400");
+                                lastErrorMessage = "API 免費額度已用盡，請檢查帳號狀態。";
+                                break; // 額度沒了，換模型也沒用，直接終止迴圈
+                            }
+                            
                             lastErrorMessage = error.message;
-                            log(`模型 ${modelName} 失敗: ${error.message}，準備嘗試備用模型...`, "text-yellow-500");
+                            log(`模型 ${modelName} 失敗: ${error.message}`, "text-yellow-500");
+                            log(`準備嘗試備用模型...`, "text-gray-400");
                         }
                     }
 
@@ -347,7 +366,7 @@
 
                 } catch (error) {
                     log(`分析徹底失敗: ${error.message}`, "text-red-500");
-                    speak(`抱歉，發生錯誤：請確認您的網路連線或金鑰是否正確。`);
+                    speak(`抱歉，發生錯誤：${error.message}`);
                 } finally {
                     isProcessing = false;
                     scanningLine.style.display = 'none';
@@ -355,7 +374,6 @@
             }, 1500); 
         }
 
-        // --- 呼叫 Gemini API ---
         async function callGeminiAPI(base64Image, promptText, key, modelName) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
             const payload = {
@@ -380,7 +398,6 @@
             }
         }
 
-        // --- 語音合成輸出 (TTS) ---
         window.speechUtterances = []; 
         function speak(text) {
             if (!window.speechSynthesis) return;
