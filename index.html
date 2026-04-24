@@ -126,7 +126,6 @@
 
     <script>
         // --- 安全金鑰處理機制 ---
-        // 絕對不要在這裡填寫明文金鑰！系統會自動從瀏覽器儲存空間讀取。
         const apiKey = ""; 
         
         function getActiveKey() {
@@ -227,7 +226,7 @@
                 try { recognition.start(); } catch(e){}
             }
 
-            // 檢查是否已設定金鑰，若無則跳出提醒
+            // 檢查是否已設定金鑰
             if (!getActiveKey()) {
                 log("請點擊右上角設定您的 API Key 以啟用分析功能", "text-yellow-400");
                 speak("系統已啟動。但您尚未設定 API Key，請點擊右上角按鈕進行設定。");
@@ -297,7 +296,7 @@
             throw new Error(`連線失敗 (${lastError.message})`);
         }
 
-        // --- 擷取畫面與分析 ---
+        // --- 擷取畫面與分析 (包含多模型備援機制) ---
         async function executeAnalysis() {
             if (isProcessing) return;
             const currentKey = getActiveKey();
@@ -321,14 +320,34 @@
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-                    log("發送至 AI 分析中...", "text-blue-300");
-                    const resultText = await callGeminiAPI(base64Image, currentMode.prompt, currentKey);
-                    
-                    log(`AI 回應: ${resultText}`, "text-white");
-                    speak(resultText); 
+                    // 定義要依序嘗試的模型清單，解決特定模型暫時失效的問題
+                    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"];
+                    let resultText = "";
+                    let success = false;
+                    let lastErrorMessage = "";
+
+                    for (const modelName of modelsToTry) {
+                        try {
+                            log(`發送至 AI 分析中 (使用模型: ${modelName})...`, "text-blue-300");
+                            resultText = await callGeminiAPI(base64Image, currentMode.prompt, currentKey, modelName);
+                            success = true;
+                            break; // 成功則跳出迴圈
+                        } catch (error) {
+                            lastErrorMessage = error.message;
+                            log(`模型 ${modelName} 失敗: ${error.message}，準備嘗試備用模型...`, "text-yellow-500");
+                        }
+                    }
+
+                    if (success) {
+                        log(`AI 回應: ${resultText}`, "text-white");
+                        speak(resultText); 
+                    } else {
+                        throw new Error(lastErrorMessage);
+                    }
+
                 } catch (error) {
-                    log(`分析失敗: ${error.message}`, "text-red-500");
-                    speak(`抱歉，發生錯誤：${error.message}`);
+                    log(`分析徹底失敗: ${error.message}`, "text-red-500");
+                    speak(`抱歉，發生錯誤：請確認您的網路連線或金鑰是否正確。`);
                 } finally {
                     isProcessing = false;
                     scanningLine.style.display = 'none';
@@ -337,8 +356,8 @@
         }
 
         // --- 呼叫 Gemini API ---
-        async function callGeminiAPI(base64Image, promptText, key) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+        async function callGeminiAPI(base64Image, promptText, key, modelName) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
             const payload = {
                 contents: [{
                     role: "user",
@@ -357,7 +376,7 @@
             if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
                 return data.candidates[0].content.parts[0].text;
             } else {
-                throw new Error("無法解析回傳格式，請檢查金鑰是否正確");
+                throw new Error("無法解析回傳格式");
             }
         }
 
